@@ -20,14 +20,17 @@ type TestUser struct {
 	Date  string `valid:"-"`
 }
 
-type TestUserService struct{}
+type TestUserService struct {
+	Foo string
+}
 
 func (s *TestUserService) Save(u *TestUser) error {
-	fmt.Printf("Called Run with %v", u)
+	fmt.Printf("Called Save with %v from %v\n", u, s)
 	return nil
 }
 
 func (s *TestUserService) Get(id int) (*TestUser, error) {
+	fmt.Printf("Called Get with %v from %v\n", id, s)
 	return nil, errors.New("User not found")
 }
 
@@ -58,7 +61,7 @@ func TestValidation(t *testing.T) {
 	}{
 		{
 			Name:       "Valid JSON",
-			URL:        "/0",
+			URL:        "/Save",
 			JSON:       map[string]string{"name": "john", "email": "a@b"},
 			StatusCode: http.StatusOK,
 		},
@@ -102,7 +105,7 @@ func TestValidation(t *testing.T) {
 			rr := httptest.NewRecorder()
 
 			// Create HTTP mux/router
-			mux := Wrap(&TestUserService{})
+			mux := Wrap(&TestUserService{Foo: "foo"})
 			mux.ServeHTTP(rr, req)
 
 			if status := rr.Code; status != s.StatusCode {

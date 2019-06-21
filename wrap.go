@@ -13,12 +13,16 @@ type serviceMethod struct {
 	params []reflect.Type
 	index  int
 	method reflect.Value
+	// receiver reflect.Value // Struct instance
 }
 
 func Wrap(service interface{}) http.Handler {
 
 	// Improve performance (and clarity) by pre-computing needed variables
 	serviceType := reflect.TypeOf(service)
+
+	// The method Call() needs this as the first value
+	serviceValue := reflect.ValueOf(service)
 
 	var methods = make(map[string]*serviceMethod)
 
@@ -28,22 +32,24 @@ func Wrap(service interface{}) http.Handler {
 
 		fmt.Printf("%v has %d params\n", methodType.Name, method.Type().NumIn())
 
-		in := make([]reflect.Type, method.Type().NumIn())
+		params := make([]reflect.Type, method.Type().NumIn())
 
 		for j := 0; j < method.Type().NumIn(); j++ {
-			in[i] = method.Type().In(j)
+			// fmt.Printf("\t%d: %v\n", j, method.Type().In(j).Kind())
+			params[j] = method.Type().In(j)
 		}
 
 		name := methodType.Name
-		methods[name] = &serviceMethod{params: in, index: i, method: method}
+		methods[name] = &serviceMethod{params: params, index: i, method: method}
 	}
 
-	// Cache setup, now get setup to process values
+	// fmt.Printf("methods: %#v\n", methods)
 
+	// Cache setup finished, now get ready to process requests
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.URL.RequestURI())
 
-		fmt.Printf("Calling %v\n", name)
+		fmt.Printf("Calling %s -> %v\n", name, methods[name].params)
 
 		method, ok := methods[name]
 
@@ -56,8 +62,17 @@ func Wrap(service interface{}) http.Handler {
 
 		for i, paramType := range method.params {
 
+			// The first item should be the method receiver instance
+			// This also enables access to struct fields from inside the method
+			if i == 0 {
+				in[i] = serviceValue
+				continue
+			}
+
 			// Create a new instance of each param
 			var object reflect.Value
+
+			fmt.Printf("paramType: %v = %v\n", paramType.Kind(), paramType)
 
 			switch paramType.Kind() {
 			case reflect.Struct:
@@ -92,6 +107,8 @@ func Wrap(service interface{}) http.Handler {
 
 			in[i] = object
 		}
+
+		// in = append([]reflect.Type{method.Method})
 
 		response := method.method.Call(in)
 
