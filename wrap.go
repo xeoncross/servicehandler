@@ -7,12 +7,22 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+
+	"github.com/asaskevich/govalidator"
 )
 
+const (
+	// TagQuery is the field tag to define a query parameter's key
+	TagQuery = "q"
+)
+
+// ValidationErrors occurs whenever one or more fields fail the validation by govalidator
+// type ValidationErrors map[string]string
+
 type serviceMethod struct {
-	params []reflect.Type
-	index  int
-	method reflect.Value
+	params  []reflect.Type
+	method  reflect.Value
+	unnamed bool
 	// receiver reflect.Value // Struct instance
 }
 
@@ -30,17 +40,23 @@ func Wrap(service interface{}) http.Handler {
 		methodType := serviceType.Method(i)
 		method := methodType.Func
 
-		fmt.Printf("%v has %d params\n", methodType.Name, method.Type().NumIn())
+		// fmt.Printf("%v has %d params\n", methodType.Name, method.Type().NumIn())
 
-		params := make([]reflect.Type, method.Type().NumIn())
+		params := make([]reflect.Type, methodType.Type.NumIn())
 
-		for j := 0; j < method.Type().NumIn(); j++ {
+		for j := 0; j < methodType.Type.NumIn(); j++ {
 			// fmt.Printf("\t%d: %v\n", j, method.Type().In(j).Kind())
-			params[j] = method.Type().In(j)
+			// params[j] = method.Type().In(j)
+			paramType := methodType.Type.In(j)
+			params[j] = paramType
+
+			// if paramType...CanInterface() {
+			// 	log.Fatalf("cantinterface %s", paramType.Name())
+			// }
 		}
 
 		name := methodType.Name
-		methods[name] = &serviceMethod{params: params, index: i, method: method}
+		methods[name] = &serviceMethod{params: params, method: method}
 	}
 
 	// fmt.Printf("methods: %#v\n", methods)
@@ -48,8 +64,7 @@ func Wrap(service interface{}) http.Handler {
 	// Cache setup finished, now get ready to process requests
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := filepath.Base(r.URL.RequestURI())
-
-		fmt.Printf("Calling %s -> %v\n", name, methods[name].params)
+		fmt.Printf("HTTP %s %s(%v)\n", r.Method, name, methods[name].params)
 
 		method, ok := methods[name]
 
@@ -60,6 +75,15 @@ func Wrap(service interface{}) http.Handler {
 
 		in := make([]reflect.Value, len(method.params))
 
+		type ValidationError struct {
+			Parameter string            `json:"parameter"`
+			Errors    map[string]string `json:"errors"`
+		}
+
+		// Collect them all so we can tell the client everything wrong at once
+		// Nah, why waste resources? Fix each problem as you have it.
+		// var validationErrors []*ValidationError
+
 		for i, paramType := range method.params {
 
 			// The first item should be the method receiver instance
@@ -69,41 +93,116 @@ func Wrap(service interface{}) http.Handler {
 				continue
 			}
 
+			fmt.Printf("%d = %s (%v)\n", i, paramType.Name(), paramType.Kind())
+
+			// If the variable fails validation
+			// var validation ValidationErrors
+
 			// Create a new instance of each param
 			var object reflect.Value
 
-			fmt.Printf("paramType: %v = %v\n", paramType.Kind(), paramType)
+			// fmt.Printf("paramType: %v = %v\n", paramType.Kind(), paramType)
 
 			switch paramType.Kind() {
 			case reflect.Struct:
 				object = newReflectType(paramType).Elem()
 			case reflect.Ptr:
 				object = newReflectType(paramType)
-			case reflect.String:
-				object = reflect.New(paramType).Elem()
+			// case reflect.String:
+			// 	object = reflect.New(paramType).Elem()
 			default:
 				fmt.Printf("Unknown type: %s", paramType.Kind().String())
 			}
 
-			if object.CanInterface() {
-				i := object.Interface()
-				err := json.NewDecoder(r.Body).Decode(&i)
-				if err != nil {
-					log.Fatal(err)
+			// TODO check this sooner before clients start connecting!
+			if !object.CanInterface() {
+				err := fmt.Errorf("Cannot interface %s", paramType.Name())
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				log.Fatal(err)
+				return
+			}
+
+			// Do we need this var?
+			objectInterface := object.Interface()
+
+			if r.Method == http.MethodGet {
+
+				fmt.Println(r.Method, "running")
+
+				numFields := paramType.NumField()
+				queryValues := r.URL.Query()
+				for i := 0; i < numFields; i++ {
+					field := paramType.Field(i)
+
+					var s string
+					tag, ok := field.Tag.Lookup(TagQuery)
+					if ok {
+						s = queryValues.Get(tag)
+					} else {
+						s = queryValues.Get(field.Name)
+					}
+
+					if s == "" {
+						// Do not fail right now, it is the job of validator
+						continue
+					}
+
+					val := object.Field(i)
+
+					fmt.Printf("%v = %s\n", field, s)
+
+					err := parseSimpleParam(s, "Query Parameter", field, &val)
+					if err != nil {
+						fmt.Println(err)
+					}
 				}
 
-				// fmt.Printf("%#v\n", object.Interface())
-				// fmt.Printf("%#v\n", i.(*ProviderA))
-
-			} else if object.CanSet() {
-				// TODO handle each type of variable
-				// var b []byte
-				// err := json.NewDecoder(strings.NewReader(`{"a":"foo"}`)).Decode(&b)
-				// if err != nil {
-				// 	t.Error(err)
-				// }
-				// object.Set(reflect.ValueOf(b))
+			} else {
+				err := json.NewDecoder(r.Body).Decode(object.Interface())
+				if err != nil {
+					// We don't care about type errors
+					// the validator will handle those messages better below
+					log.Println(err)
+				}
 			}
+
+			// 2. Validate the struct data rules
+			var isValid bool
+			isValid, err := govalidator.ValidateStruct(objectInterface)
+
+			if !isValid {
+				validationErrors := govalidator.ErrorsByField(err)
+
+				// type ValidationResponse struct {
+				// 	Success bool             `json:"success"`
+				// 	Errors  ValidationErrors `json:"errors"`
+				// }
+
+				w.WriteHeader(http.StatusBadRequest)
+				JSON(w, ValidationError{
+					"WIP",
+					validationErrors,
+				})
+				return
+			}
+
+			// if len(validation) > 0 {
+			// 	log.Fatalf("%v\n", validation)
+			// 	return
+			// }
+
+			// fmt.Printf("%#v\n", object.Interface())
+			// fmt.Printf("%#v\n", i.(*ProviderA))
+
+			// } else if object.CanSet() {
+			// 	// TODO handle each type of variable
+			// 	// var b []byte
+			// 	// err := json.NewDecoder(strings.NewReader(`{"a":"foo"}`)).Decode(&b)
+			// 	// if err != nil {
+			// 	// 	t.Error(err)
+			// 	// }
+			// 	// object.Set(reflect.ValueOf(b))
+			// }
 
 			in[i] = object
 		}
@@ -117,7 +216,7 @@ func Wrap(service interface{}) http.Handler {
 		for _, item := range response {
 			if err, ok := item.Interface().(error); ok {
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusNotFound)
+					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
 			} else {

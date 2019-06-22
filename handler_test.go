@@ -24,14 +24,28 @@ type TestUserService struct {
 	Foo string
 }
 
-func (s *TestUserService) Save(u *TestUser) error {
+// Test POST with JSON body
+func (s *TestUserService) Save(u *TestUser) (int, error) {
 	fmt.Printf("Called Save with %v from %v\n", u, s)
-	return nil
+
+	return 23, nil
 }
 
-func (s *TestUserService) Get(id int) (*TestUser, error) {
-	fmt.Printf("Called Get with %v from %v\n", id, s)
+// Test GET with single URL param
+func (s *TestUserService) Get(params struct {
+	id int `valid:"required,email"`
+}) (*TestUser, error) {
+	fmt.Printf("Called Get with %v\n", params.id)
 	return nil, errors.New("User not found")
+}
+
+// Test GET with multiple params for loading
+func (s *TestUserService) Recent(params struct {
+	page    int
+	perPage int
+}) ([]*TestUser, error) {
+	fmt.Printf("Called Recent with %v from %v\n", params.page, params.perPage)
+	return nil, nil
 }
 
 // type sample struct {
@@ -65,6 +79,12 @@ func TestValidation(t *testing.T) {
 			JSON:       map[string]string{"name": "john", "email": "a@b"},
 			StatusCode: http.StatusOK,
 		},
+		{
+			Name:       "Valid JSON",
+			URL:        "/Get",
+			JSON:       nil,
+			StatusCode: http.StatusOK,
+		},
 	}
 
 	var err error
@@ -86,17 +106,17 @@ func TestValidation(t *testing.T) {
 				}
 
 				req.Header.Add("Content-Type", "application/json")
-			} else if s.Form != nil {
-
-				f := s.Form
-				req, err = http.NewRequest("POST", s.URL, strings.NewReader(f.Encode()))
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				// } else if s.Form != nil {
+				//
+				// 	f := s.Form
+				// 	req, err = http.NewRequest("POST", s.URL, strings.NewReader(f.Encode()))
+				// 	if err != nil {
+				// 		t.Fatal(err)
+				// 	}
+				//
+				// 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 			} else {
-				req, err = http.NewRequest("POST", s.URL, nil)
+				req, err = http.NewRequest("GET", s.URL, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
