@@ -16,20 +16,32 @@ const (
 	TagQuery = "q"
 )
 
-// ValidationErrors occurs whenever one or more fields fail the validation by govalidator
-// type ValidationErrors map[string]string
+// ValidationResponse on client input error
+type ValidationResponse struct {
+	Success bool              `json:"success"`
+	Errors  map[string]string `json:"errors"`
+}
 
+// Wrapper for a service method
 type serviceMethod struct {
-	params  []reflect.Type
-	method  reflect.Value
-	unnamed bool
-	// receiver reflect.Value // Struct instance
+	in        []reflect.Type
+	out       []reflect.Type
+	method    reflect.Value
+	anonymous bool
 }
 
 func Wrap(service interface{}) http.Handler {
 
 	// Improve performance (and clarity) by pre-computing needed variables
 	serviceType := reflect.TypeOf(service)
+
+	// For error logs
+	var serviceName string
+	if serviceType.Kind() == reflect.Ptr {
+		serviceName = serviceType.Elem().Name()
+	} else {
+		serviceName = serviceType.Name()
+	}
 
 	// The method Call() needs this as the first value
 	serviceValue := reflect.ValueOf(service)
@@ -40,32 +52,72 @@ func Wrap(service interface{}) http.Handler {
 		methodType := serviceType.Method(i)
 		method := methodType.Func
 
-		// fmt.Printf("%v has %d params\n", methodType.Name, method.Type().NumIn())
+		if methodType.Type.NumIn() != 2 {
+			log.Fatalf("%s.%s() should only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+		}
 
-		params := make([]reflect.Type, methodType.Type.NumIn())
+		// TODO we've basically decided on only a single parameter
+		// Time to remove all this code for handling multiple in
+		in := make([]reflect.Type, methodType.Type.NumIn())
+
+		// Marker for anonymous structs as parameters
+		var anonymous bool
 
 		for j := 0; j < methodType.Type.NumIn(); j++ {
-			// fmt.Printf("\t%d: %v\n", j, method.Type().In(j).Kind())
-			// params[j] = method.Type().In(j)
 			paramType := methodType.Type.In(j)
-			params[j] = paramType
+			in[j] = paramType
 
-			// if paramType...CanInterface() {
-			// 	log.Fatalf("cantinterface %s", paramType.Name())
+			// First param is method receiver
+			if j == 0 {
+				continue
+			}
+
+			if paramType.Kind() != reflect.Struct && paramType.Kind() != reflect.Ptr {
+				log.Fatalf("%s.%s() should only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+			}
+
+			// Is this check needed? Is there ever a time when a struct/struct ptr
+			// can't be used as an interface?
+			// var object reflect.Value
+			// switch paramType.Kind() {
+			// case reflect.Struct:
+			// 	object = newReflectType(paramType).Elem()
+			// case reflect.Ptr:
+			// 	object = newReflectType(paramType)
 			// }
+			//
+			// if !object.CanInterface() {
+			// 	log.Fatalf("%s.%s() should only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+			// }
+
+			// Is this an anonymous struct?
+			if paramType.Kind() == reflect.Struct {
+				if paramType.Name() == "" {
+					anonymous = true
+				}
+			}
+
+		}
+
+		out := make([]reflect.Type, methodType.Type.NumOut())
+
+		for j := 0; j < methodType.Type.NumOut(); j++ {
+			paramType := methodType.Type.Out(j)
+			out[j] = paramType
 		}
 
 		name := methodType.Name
-		methods[name] = &serviceMethod{params: params, method: method}
+		methods[name] = &serviceMethod{
+			in:        in,
+			out:       out,
+			anonymous: anonymous,
+			method:    method,
+		}
 	}
-
-	// fmt.Printf("methods: %#v\n", methods)
 
 	// Cache setup finished, now get ready to process requests
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := filepath.Base(r.URL.RequestURI())
-		fmt.Printf("HTTP %s %s(%v)\n", r.Method, name, methods[name].params)
-
+		name := filepath.Base(r.URL.Path)
 		method, ok := methods[name]
 
 		if !ok {
@@ -73,18 +125,11 @@ func Wrap(service interface{}) http.Handler {
 			return
 		}
 
-		in := make([]reflect.Value, len(method.params))
+		fmt.Printf("HTTP %s %s(%v)\n", r.Method, name, methods[name].in[1])
 
-		type ValidationError struct {
-			Parameter string            `json:"parameter"`
-			Errors    map[string]string `json:"errors"`
-		}
+		in := make([]reflect.Value, len(method.in))
 
-		// Collect them all so we can tell the client everything wrong at once
-		// Nah, why waste resources? Fix each problem as you have it.
-		// var validationErrors []*ValidationError
-
-		for i, paramType := range method.params {
+		for i, paramType := range method.in {
 
 			// The first item should be the method receiver instance
 			// This also enables access to struct fields from inside the method
@@ -93,12 +138,7 @@ func Wrap(service interface{}) http.Handler {
 				continue
 			}
 
-			fmt.Printf("%d = %s (%v)\n", i, paramType.Name(), paramType.Kind())
-
-			// If the variable fails validation
-			// var validation ValidationErrors
-
-			// Create a new instance of each param
+			// Create a new instance for each goroutine
 			var object reflect.Value
 
 			// fmt.Printf("paramType: %v = %v\n", paramType.Kind(), paramType)
@@ -108,31 +148,20 @@ func Wrap(service interface{}) http.Handler {
 				object = newReflectType(paramType).Elem()
 			case reflect.Ptr:
 				object = newReflectType(paramType)
-			// case reflect.String:
-			// 	object = reflect.New(paramType).Elem()
-			default:
-				fmt.Printf("Unknown type: %s", paramType.Kind().String())
+				// default:
+				// 	fmt.Printf("Unknown type: %s", paramType.Kind().String())
 			}
-
-			// TODO check this sooner before clients start connecting!
-			if !object.CanInterface() {
-				err := fmt.Errorf("Cannot interface %s", paramType.Name())
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				log.Fatal(err)
-				return
-			}
-
-			// Do we need this var?
-			objectInterface := object.Interface()
 
 			if r.Method == http.MethodGet {
 
-				fmt.Println(r.Method, "running")
+				if !method.anonymous {
+					log.Fatal("This isn't how you call this method")
+				}
 
 				numFields := paramType.NumField()
 				queryValues := r.URL.Query()
-				for i := 0; i < numFields; i++ {
-					field := paramType.Field(i)
+				for j := 0; j < numFields; j++ {
+					field := paramType.Field(j)
 
 					var s string
 					tag, ok := field.Tag.Lookup(TagQuery)
@@ -142,14 +171,14 @@ func Wrap(service interface{}) http.Handler {
 						s = queryValues.Get(field.Name)
 					}
 
+					// fmt.Printf("Field: %v = %q\n", field.Name, s)
+
 					if s == "" {
 						// Do not fail right now, it is the job of validator
 						continue
 					}
 
-					val := object.Field(i)
-
-					fmt.Printf("%v = %s\n", field, s)
+					val := object.Field(j)
 
 					err := parseSimpleParam(s, "Query Parameter", field, &val)
 					if err != nil {
@@ -157,42 +186,37 @@ func Wrap(service interface{}) http.Handler {
 					}
 				}
 
-			} else {
-				err := json.NewDecoder(r.Body).Decode(object.Interface())
-				if err != nil {
-					// We don't care about type errors
-					// the validator will handle those messages better below
-					log.Println(err)
+				// fmt.Printf("GET objectInterface = %v\n", object.Interface())
+
+			} else if r.Method == "POST" {
+
+				if method.anonymous {
+					log.Fatal("this isn't how you call this method")
 				}
+
+				oi := object.Interface()
+				_ = json.NewDecoder(r.Body).Decode(&oi)
+				// if err != nil {
+				// 	// We don't care about type errors
+				// 	// the validator will handle those messages better below
+				// 	log.Println(err)
+				// }
 			}
 
 			// 2. Validate the struct data rules
-			var isValid bool
-			isValid, err := govalidator.ValidateStruct(objectInterface)
+			// var isValid bool
+			isValid, err := govalidator.ValidateStruct(object.Interface())
 
 			if !isValid {
 				validationErrors := govalidator.ErrorsByField(err)
 
-				// type ValidationResponse struct {
-				// 	Success bool             `json:"success"`
-				// 	Errors  ValidationErrors `json:"errors"`
-				// }
-
 				w.WriteHeader(http.StatusBadRequest)
-				JSON(w, ValidationError{
-					"WIP",
+				JSON(w, ValidationResponse{
+					false,
 					validationErrors,
 				})
 				return
 			}
-
-			// if len(validation) > 0 {
-			// 	log.Fatalf("%v\n", validation)
-			// 	return
-			// }
-
-			// fmt.Printf("%#v\n", object.Interface())
-			// fmt.Printf("%#v\n", i.(*ProviderA))
 
 			// } else if object.CanSet() {
 			// 	// TODO handle each type of variable
@@ -207,11 +231,11 @@ func Wrap(service interface{}) http.Handler {
 			in[i] = object
 		}
 
-		// in = append([]reflect.Type{method.Method})
-
 		response := method.method.Call(in)
 
 		var results []interface{}
+
+		// TODO use method.out here for proper names instead of []slice
 
 		for _, item := range response {
 			if err, ok := item.Interface().(error); ok {

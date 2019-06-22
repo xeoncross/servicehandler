@@ -14,10 +14,10 @@ import (
 )
 
 type TestUser struct {
-	Name  string `valid:"alphanum,required"`
-	Email string `valid:"email,required"`
-	Bio   string `valid:"ascii,required"`
-	Date  string `valid:"-"`
+	Name string `valid:"alphanum,required"`
+	// Email string `valid:"email,required"`
+	// Bio   string `valid:"ascii,required"`
+	Date string `valid:"-"`
 }
 
 type TestUserService struct {
@@ -33,18 +33,18 @@ func (s *TestUserService) Save(u *TestUser) (int, error) {
 
 // Test GET with single URL param
 func (s *TestUserService) Get(params struct {
-	id int `valid:"required,email"`
+	ID int `valid:"required"`
 }) (*TestUser, error) {
-	fmt.Printf("Called Get with %v\n", params.id)
+	fmt.Printf("Called Get with %v\n", params.ID)
 	return nil, errors.New("User not found")
 }
 
 // Test GET with multiple params for loading
 func (s *TestUserService) Recent(params struct {
-	page    int
-	perPage int
+	Page    int
+	PerPage int
 }) ([]*TestUser, error) {
-	fmt.Printf("Called Recent with %v from %v\n", params.page, params.perPage)
+	fmt.Printf("Called Recent with %v from %v\n", params.Page, params.PerPage)
 	return nil, nil
 }
 
@@ -80,8 +80,8 @@ func TestValidation(t *testing.T) {
 			StatusCode: http.StatusOK,
 		},
 		{
-			Name:       "Valid JSON",
-			URL:        "/Get",
+			Name:       "Invalid Query Parameters",
+			URL:        "/Get?ID=34",
 			JSON:       nil,
 			StatusCode: http.StatusOK,
 		},

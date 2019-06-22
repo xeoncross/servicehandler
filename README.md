@@ -21,7 +21,7 @@ The issue with this approach is that services probably shouldn't handle things l
 
 Someone tried a basic version of this before making [gomvc](https://github.com/sdming/gomvc)
 
-# Go doesn't support parameter names
+## Go doesn't support parameter names
 
 In the following function, there is no way to get the name "page" of the `int` parameter.
 
@@ -49,6 +49,15 @@ To prevent creating two ways for requesting the same data (GET url params & POST
     GET -> params struct{page int}
 
 
+## Struct Fields must be Public
+
+[govalidator](https://godoc.org/github.com/asaskevich/govalidator#ValidateStruct) will not try to validate private fields. Make sure all struct fields are public.
+
+    a := &struct {
+      email string `valid:"email,required"`
+    }{}
+
+    isValid, err := govalidator.ValidateStruct(a)
 
 
 Also:

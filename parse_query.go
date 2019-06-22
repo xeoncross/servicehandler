@@ -9,7 +9,8 @@ import (
 )
 
 // The following code was borrowed from https://github.com/mustafaakin/gongular
-// It's a shame they don't share these unit-tested functions publically
+// It would be handy if they shared these unit-tested functions publically for
+// projects like this that need to parse url.Values
 
 // ParseError occurs whenever the field cannot be parsed, i.e. type mismatch
 type ParseError struct {
