@@ -24,8 +24,8 @@ type JSONResponse struct {
 
 // Wrapper for a service method
 type serviceMethod struct {
-	in        []reflect.Type
-	out       []reflect.Type
+	in []reflect.Type
+	// out       []reflect.Type
 	method    reflect.Value
 	anonymous bool
 }
@@ -54,6 +54,10 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 		if methodType.Type.NumIn() != 2 {
 			return nil, fmt.Errorf("%s.%s() can only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+		}
+
+		if methodType.Type.NumOut() > 2 {
+			return nil, fmt.Errorf("%s.%s() should return ([]slice/struct{}, error) or (error).", serviceName, methodType.Name)
 		}
 
 		// TODO we've basically decided on only a single parameter
@@ -99,17 +103,17 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 		}
 
-		out := make([]reflect.Type, methodType.Type.NumOut())
-
-		for j := 0; j < methodType.Type.NumOut(); j++ {
-			paramType := methodType.Type.Out(j)
-			out[j] = paramType
-		}
+		// out := make([]reflect.Type, methodType.Type.NumOut())
+		//
+		// for j := 0; j < methodType.Type.NumOut(); j++ {
+		// 	paramType := methodType.Type.Out(j)
+		// 	out[j] = paramType
+		// }
 
 		name := methodType.Name
 		methods[name] = &serviceMethod{
-			in:        in,
-			out:       out,
+			in: in,
+			// out:       out,
 			anonymous: anonymous,
 			method:    method,
 		}
@@ -288,29 +292,56 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 				results[name] = response[i].Interface()
 			}
+			JSON(w, results)
 		*/
 
-		var results []interface{}
-		for _, item := range response {
-			if err, ok := item.Interface().(error); ok {
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-			} else {
-				results = append(results, item.Interface())
+		//
+		// Multiple return values as slice elements
+		//
+
+		// var results []interface{}
+		// for _, item := range response {
+		// 	if err, ok := item.Interface().(error); ok {
+		// 		if err != nil {
+		// 			http.Error(w, err.Error(), http.StatusBadRequest)
+		// 			return
+		// 		}
+		// 	} else {
+		// 		results = append(results, item.Interface())
+		// 	}
+		// }
+		//
+		// if len(results) > 0 {
+		// 	if len(results) == 1 {
+		// 		JSON(w, results[0])
+		// 	} else {
+		// 		JSON(w, results)
+		// 	}
+		// }
+
+		//
+		// v3: Expect all services to return in one of two forms:
+		// func () error {}
+		// func () (interface{}, error)
+		//
+
+		ek := 0
+		if method.method.Type().NumOut() == 2 {
+			ek = 1
+		}
+
+		if err, ok := response[ek].Interface().(error); ok {
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
 			}
 		}
 
-		if len(results) > 0 {
-			if len(results) == 1 {
-				JSON(w, results[0])
-			} else {
-				JSON(w, results)
-			}
+		if ek == 0 {
+			return
 		}
 
-		JSON(w, results)
+		JSON(w, response[0].Interface())
 
 	}), nil
 }
