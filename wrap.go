@@ -17,15 +17,15 @@ const (
 
 // JSONResponse for validation errors or service responses
 type JSONResponse struct {
-	Success bool                   `json:"success"`
-	Data    map[string]interface{} `json:"data"`
-	Errors  map[string]string      `json:"errors"`
+	Success bool              `json:"success"`
+	Data    interface{}       `json:"data,omitempty"`
+	Error   string            `json:"error,omitempty"`
+	Fields  map[string]string `json:"fields,omitempty"`
 }
 
 // Wrapper for a service method
 type serviceMethod struct {
-	in []reflect.Type
-	// out       []reflect.Type
+	in        []reflect.Type
 	method    reflect.Value
 	anonymous bool
 }
@@ -103,17 +103,9 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 		}
 
-		// out := make([]reflect.Type, methodType.Type.NumOut())
-		//
-		// for j := 0; j < methodType.Type.NumOut(); j++ {
-		// 	paramType := methodType.Type.Out(j)
-		// 	out[j] = paramType
-		// }
-
 		name := methodType.Name
 		methods[name] = &serviceMethod{
-			in: in,
-			// out:       out,
+			in:        in,
 			anonymous: anonymous,
 			method:    method,
 		}
@@ -144,20 +136,17 @@ func Wrap(service interface{}) (http.Handler, error) {
 			// Create a new instance for each goroutine
 			var object reflect.Value
 
-			// fmt.Printf("paramType: %v = %v\n", paramType.Kind(), paramType)
-
 			switch paramType.Kind() {
 			case reflect.Struct:
 				object = newReflectType(paramType).Elem()
 			case reflect.Ptr:
 				object = newReflectType(paramType)
-				// default:
-				// 	fmt.Printf("Unknown type: %s", paramType.Kind().String())
 			}
 
 			if r.Method == http.MethodGet {
 				if !method.anonymous {
 					http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+					return
 				}
 
 				numFields := paramType.NumField()
@@ -184,7 +173,8 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 					err := parseSimpleParam(s, "Query Parameter", field, &val)
 					if err != nil {
-						fmt.Println(err)
+						// fmt.Println(err)
+						// What should we do here?
 					}
 				}
 
@@ -194,6 +184,7 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 				if method.anonymous {
 					http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+					return
 				}
 
 				oi := object.Interface()
@@ -206,7 +197,6 @@ func Wrap(service interface{}) (http.Handler, error) {
 			}
 
 			// 2. Validate the struct data rules
-			// var isValid bool
 			isValid, err := govalidator.ValidateStruct(object.Interface())
 
 			if !isValid {
@@ -215,116 +205,20 @@ func Wrap(service interface{}) (http.Handler, error) {
 				w.WriteHeader(http.StatusBadRequest)
 				JSON(w, JSONResponse{
 					Success: false,
-					Errors:  validationErrors,
+					Error:   "Invalid Request",
+					Fields:  validationErrors,
 				})
 				return
 			}
-
-			// } else if object.CanSet() {
-			// 	// TODO handle each type of variable
-			// 	// var b []byte
-			// 	// err := json.NewDecoder(strings.NewReader(`{"a":"foo"}`)).Decode(&b)
-			// 	// if err != nil {
-			// 	// 	t.Error(err)
-			// 	// }
-			// 	// object.Set(reflect.ValueOf(b))
-			// }
 
 			in[i] = object
 		}
 
 		response := method.method.Call(in)
 
-		/*
-			//
-			// Named results
-			//
-			// This is not easy because again, Go doesn't save variable names and most
-			// services don't return named properties anyway. For example, what should
-			// we name the variables from the following service call?
-			//
-			// func A() (*B, int, string)
-			//
-			results := make(map[string]interface{}, len(method.out))
-
-			_ = response
-			// Find the proper names of the variables so we don't
-			for i, paramType := range method.out {
-
-				fmt.Printf("%d = %v\n", i, paramType.Kind())
-
-				// switch paramType.Kind() {
-				// case reflect.Interface, reflect.Struct, reflect.Ptr:
-				// 	if response[i].IsNil() {
-				// 		continue
-				// 	}
-				// }
-
-				// errors, structs, and struct pointers should not be returned empty
-				// if paramType.Kind() == reflect.Interface
-				// || paramType.Kind() != reflect.Struct
-				// || paramType.Kind() != reflect.Ptr
-				// }} paramType.Kind() == reflect.Slice { {
-				//
-				// }
-
-				// Skip slices, interfaces (error), structs, etc.. that are nil
-				if response[i].IsNil() {
-					continue
-				}
-
-				// Try to use the same name as the struct
-				var name string
-				if paramType.Kind() == reflect.Ptr {
-					name = paramType.Elem().Name()
-				} else if paramType.Kind() == reflect.Struct {
-					name = paramType.Name()
-				}
-
-				if name == "" {
-					name = fmt.Sprintf("%s%d", paramType.Elem().Name(), i)
-				}
-
-				// name := strconv.Itoa(i)
-				if paramType.Kind() != reflect.Struct && paramType.Kind() != reflect.Ptr {
-					// forbar
-				}
-
-				results[name] = response[i].Interface()
-			}
-			JSON(w, results)
-		*/
-
-		//
-		// Multiple return values as slice elements
-		//
-
-		// var results []interface{}
-		// for _, item := range response {
-		// 	if err, ok := item.Interface().(error); ok {
-		// 		if err != nil {
-		// 			http.Error(w, err.Error(), http.StatusBadRequest)
-		// 			return
-		// 		}
-		// 	} else {
-		// 		results = append(results, item.Interface())
-		// 	}
-		// }
-		//
-		// if len(results) > 0 {
-		// 	if len(results) == 1 {
-		// 		JSON(w, results[0])
-		// 	} else {
-		// 		JSON(w, results)
-		// 	}
-		// }
-
-		//
-		// v3: Expect all services to return in one of two forms:
-		// func () error {}
-		// func () (interface{}, error)
-		//
-
+		// Expect all service methods in one of two forms:
+		// func (...) error
+		// func (...) (interface{}, error)
 		ek := 0
 		if method.method.Type().NumOut() == 2 {
 			ek = 1
@@ -332,7 +226,11 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 		if err, ok := response[ek].Interface().(error); ok {
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				// http.Error(w, err.Error(), http.StatusBadRequest)
+				JSON(w, JSONResponse{
+					Success: false,
+					Error:   err.Error(),
+				})
 				return
 			}
 		}
@@ -341,7 +239,10 @@ func Wrap(service interface{}) (http.Handler, error) {
 			return
 		}
 
-		JSON(w, response[0].Interface())
+		JSON(w, JSONResponse{
+			Success: true,
+			Data:    response[0].Interface(),
+		})
 
 	}), nil
 }

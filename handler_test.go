@@ -3,7 +3,6 @@ package servicehandler
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -25,8 +24,7 @@ type TestUserService struct {
 
 // Test POST with JSON body
 func (s *TestUserService) Save(u *TestUser) (int, error) {
-	fmt.Printf("Called Save with %v from %v\n", u, s)
-
+	// fmt.Printf("Called Save with %v from %v\n", u, s)
 	return 23, nil
 }
 
@@ -34,7 +32,7 @@ func (s *TestUserService) Save(u *TestUser) (int, error) {
 func (s *TestUserService) Get(params struct {
 	ID int `valid:"required"`
 }) (*TestUser, error) {
-	fmt.Printf("Called Get with %v\n", params.ID)
+	// fmt.Printf("Called Get with %v\n", params.ID)
 	return &TestUser{Name: "John"}, nil
 	// return nil, errors.New("User not found")
 }
@@ -44,8 +42,8 @@ func (s *TestUserService) Recent(params struct {
 	Page    int
 	PerPage int
 }) ([]*TestUser, error) {
-	fmt.Printf("Called Recent with %v from %v\n", params.Page, params.PerPage)
-	return nil, nil
+	// fmt.Printf("Called Recent with %v from %v\n", params.Page, params.PerPage)
+	return []*TestUser{&TestUser{Name: "Alice"}, &TestUser{Name: "Bob"}}, nil
 }
 
 // type sample struct {
@@ -73,18 +71,31 @@ func TestValidation(t *testing.T) {
 		StatusCode int
 		Response   string
 	}{
-		// {
-		// 	Name:       "Valid JSON",
-		// 	URL:        "/Save",
-		// 	JSON:       map[string]string{"name": "john", "email": "a@b"},
-		// 	StatusCode: http.StatusOK,
-		// 	Response:   "foo",
-		// },
 		{
-			Name:       "Valid Query Parameters",
+			Name:       "Valid JSON",
+			URL:        "/Save",
+			JSON:       map[string]string{"name": "john", "email": "a@b"},
+			StatusCode: http.StatusOK,
+			// Response:   "foo",
+		},
+		{
+			Name:       "Valid Query Parameter",
 			URL:        "/Get?ID=34",
 			JSON:       nil,
-			StatusCode: http.StatusGone,
+			StatusCode: http.StatusOK,
+		},
+		{
+			Name:       "Inalid Query Parameter",
+			URL:        "/Get?ID=foo",
+			JSON:       nil,
+			StatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Valid Query Parameters",
+			URL:  "/Recent?Page=1&PerPage=23",
+			JSON: nil,
+			// Response:   "a",
+			StatusCode: http.StatusOK,
 		},
 	}
 
@@ -134,14 +145,14 @@ func TestValidation(t *testing.T) {
 			mux.ServeHTTP(rr, req)
 
 			if status := rr.Code; status != s.StatusCode {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, s.StatusCode)
-				t.Log(rr.Body.String())
+				t.Errorf("%s returned wrong status code: got %v want %v", s.URL, status, s.StatusCode)
+				// t.Log(rr.Body.String())
 			}
 
 			if s.Response != "" {
 				response := strings.TrimSpace(rr.Body.String())
 				if response != s.Response {
-					t.Errorf("handler returned wrong response:\ngot %qwant %q", response, s.Response)
+					t.Errorf("%s returned wrong response:\ngot %s\nwant %s", s.URL, response, s.Response)
 				}
 			}
 
