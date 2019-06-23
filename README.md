@@ -63,3 +63,8 @@ To prevent creating two ways for requesting the same data (GET url params & POST
 Also:
 
 - https://stackoverflow.com/questions/31377433/getting-method-parameter-names-in-golang
+
+## Projects
+
+- https://github.com/google/jsonapi
+- 

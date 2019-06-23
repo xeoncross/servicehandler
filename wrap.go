@@ -3,7 +3,6 @@ package servicehandler
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -16,10 +15,11 @@ const (
 	TagQuery = "q"
 )
 
-// ValidationResponse on client input error
-type ValidationResponse struct {
-	Success bool              `json:"success"`
-	Errors  map[string]string `json:"errors"`
+// JSONResponse for validation errors or service responses
+type JSONResponse struct {
+	Success bool                   `json:"success"`
+	Data    map[string]interface{} `json:"data"`
+	Errors  map[string]string      `json:"errors"`
 }
 
 // Wrapper for a service method
@@ -30,7 +30,7 @@ type serviceMethod struct {
 	anonymous bool
 }
 
-func Wrap(service interface{}) http.Handler {
+func Wrap(service interface{}) (http.Handler, error) {
 
 	// Improve performance (and clarity) by pre-computing needed variables
 	serviceType := reflect.TypeOf(service)
@@ -53,7 +53,7 @@ func Wrap(service interface{}) http.Handler {
 		method := methodType.Func
 
 		if methodType.Type.NumIn() != 2 {
-			log.Fatalf("%s.%s() should only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+			return nil, fmt.Errorf("%s.%s() can only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
 		}
 
 		// TODO we've basically decided on only a single parameter
@@ -73,7 +73,7 @@ func Wrap(service interface{}) http.Handler {
 			}
 
 			if paramType.Kind() != reflect.Struct && paramType.Kind() != reflect.Ptr {
-				log.Fatalf("%s.%s() should only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+				return nil, fmt.Errorf("%s.%s() can only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
 			}
 
 			// Is this check needed? Is there ever a time when a struct/struct ptr
@@ -121,12 +121,11 @@ func Wrap(service interface{}) http.Handler {
 		method, ok := methods[name]
 
 		if !ok {
-			http.Error(w, fmt.Sprintf("Unknown method %s", name), http.StatusNotFound)
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		fmt.Printf("HTTP %s %s(%v)\n", r.Method, name, methods[name].in[1])
-
+		// fmt.Printf("HTTP %s %s(%v)\n", r.Method, name, methods[name].in[1])
 		in := make([]reflect.Value, len(method.in))
 
 		for i, paramType := range method.in {
@@ -153,9 +152,8 @@ func Wrap(service interface{}) http.Handler {
 			}
 
 			if r.Method == http.MethodGet {
-
 				if !method.anonymous {
-					log.Fatal("This isn't how you call this method")
+					http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 				}
 
 				numFields := paramType.NumField()
@@ -191,13 +189,13 @@ func Wrap(service interface{}) http.Handler {
 			} else if r.Method == "POST" {
 
 				if method.anonymous {
-					log.Fatal("this isn't how you call this method")
+					http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 				}
 
 				oi := object.Interface()
 				_ = json.NewDecoder(r.Body).Decode(&oi)
 				// if err != nil {
-				// 	// We don't care about type errors
+				// 	// We don't care about JSON type errors nor want to give app details out
 				// 	// the validator will handle those messages better below
 				// 	log.Println(err)
 				// }
@@ -211,9 +209,9 @@ func Wrap(service interface{}) http.Handler {
 				validationErrors := govalidator.ErrorsByField(err)
 
 				w.WriteHeader(http.StatusBadRequest)
-				JSON(w, ValidationResponse{
-					false,
-					validationErrors,
+				JSON(w, JSONResponse{
+					Success: false,
+					Errors:  validationErrors,
 				})
 				return
 			}
@@ -233,10 +231,66 @@ func Wrap(service interface{}) http.Handler {
 
 		response := method.method.Call(in)
 
+		/*
+			//
+			// Named results
+			//
+			// This is not easy because again, Go doesn't save variable names and most
+			// services don't return named properties anyway. For example, what should
+			// we name the variables from the following service call?
+			//
+			// func A() (*B, int, string)
+			//
+			results := make(map[string]interface{}, len(method.out))
+
+			_ = response
+			// Find the proper names of the variables so we don't
+			for i, paramType := range method.out {
+
+				fmt.Printf("%d = %v\n", i, paramType.Kind())
+
+				// switch paramType.Kind() {
+				// case reflect.Interface, reflect.Struct, reflect.Ptr:
+				// 	if response[i].IsNil() {
+				// 		continue
+				// 	}
+				// }
+
+				// errors, structs, and struct pointers should not be returned empty
+				// if paramType.Kind() == reflect.Interface
+				// || paramType.Kind() != reflect.Struct
+				// || paramType.Kind() != reflect.Ptr
+				// }} paramType.Kind() == reflect.Slice { {
+				//
+				// }
+
+				// Skip slices, interfaces (error), structs, etc.. that are nil
+				if response[i].IsNil() {
+					continue
+				}
+
+				// Try to use the same name as the struct
+				var name string
+				if paramType.Kind() == reflect.Ptr {
+					name = paramType.Elem().Name()
+				} else if paramType.Kind() == reflect.Struct {
+					name = paramType.Name()
+				}
+
+				if name == "" {
+					name = fmt.Sprintf("%s%d", paramType.Elem().Name(), i)
+				}
+
+				// name := strconv.Itoa(i)
+				if paramType.Kind() != reflect.Struct && paramType.Kind() != reflect.Ptr {
+					// forbar
+				}
+
+				results[name] = response[i].Interface()
+			}
+		*/
+
 		var results []interface{}
-
-		// TODO use method.out here for proper names instead of []slice
-
 		for _, item := range response {
 			if err, ok := item.Interface().(error); ok {
 				if err != nil {
@@ -256,7 +310,9 @@ func Wrap(service interface{}) http.Handler {
 			}
 		}
 
-	})
+		JSON(w, results)
+
+	}), nil
 }
 
 func newReflectType(t reflect.Type) reflect.Value {
@@ -272,7 +328,9 @@ func newReflectType(t reflect.Type) reflect.Value {
 func JSON(w http.ResponseWriter, i interface{}) {
 	var err error
 	w.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(w).Encode(i)
+	e := json.NewEncoder(w)
+	// e.SetIndent("", "  ")
+	err = e.Encode(i)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

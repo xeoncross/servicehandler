@@ -3,7 +3,6 @@ package servicehandler
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -36,7 +35,8 @@ func (s *TestUserService) Get(params struct {
 	ID int `valid:"required"`
 }) (*TestUser, error) {
 	fmt.Printf("Called Get with %v\n", params.ID)
-	return nil, errors.New("User not found")
+	return &TestUser{Name: "John"}, nil
+	// return nil, errors.New("User not found")
 }
 
 // Test GET with multiple params for loading
@@ -73,17 +73,18 @@ func TestValidation(t *testing.T) {
 		StatusCode int
 		Response   string
 	}{
+		// {
+		// 	Name:       "Valid JSON",
+		// 	URL:        "/Save",
+		// 	JSON:       map[string]string{"name": "john", "email": "a@b"},
+		// 	StatusCode: http.StatusOK,
+		// 	Response:   "foo",
+		// },
 		{
-			Name:       "Valid JSON",
-			URL:        "/Save",
-			JSON:       map[string]string{"name": "john", "email": "a@b"},
-			StatusCode: http.StatusOK,
-		},
-		{
-			Name:       "Invalid Query Parameters",
+			Name:       "Valid Query Parameters",
 			URL:        "/Get?ID=34",
 			JSON:       nil,
-			StatusCode: http.StatusOK,
+			StatusCode: http.StatusGone,
 		},
 	}
 
@@ -125,7 +126,11 @@ func TestValidation(t *testing.T) {
 			rr := httptest.NewRecorder()
 
 			// Create HTTP mux/router
-			mux := Wrap(&TestUserService{Foo: "foo"})
+			mux, err := Wrap(&TestUserService{Foo: "foo"})
+			if err != nil {
+				log.Fatal(err)
+			}
+
 			mux.ServeHTTP(rr, req)
 
 			if status := rr.Code; status != s.StatusCode {
