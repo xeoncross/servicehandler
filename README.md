@@ -28,6 +28,7 @@ log.Fatal(http.ListenAndServe(":8080", handler))
 
 This is called [Dependency injection](https://medium.com/@zach_4342/dependency-injection-in-golang-e587c69478a8).
 
+For a complete example, see the [Example Application](https://github.com/Xeoncross/servicehandler/blob/master/example/README.md).
 
 # Internal Logic
 
@@ -36,10 +37,12 @@ This is called [Dependency injection](https://medium.com/@zach_4342/dependency-i
 
 To prevent creating two ways for requesting the same data (url params & JSON) we will only allow GET requests if the param is an anonymous struct (`struct { a int }`) and vis-versa for POST JSON not allowing GET if the struct is a known type (`type User struct`)
 
-    POST -> u \*User
-    GET -> params struct{page int}
+```
+POST -> u *User
+GET -> params struct{page int}
+```
 
-Note: Struct Fields must be Public. [govalidator](https://godoc.org/github.com/asaskevich/govalidator#ValidateStruct) will not try to validate private fields. Make sure all struct fields are public.
+Please note, struct fields must be public (Capitalized). [govalidator](https://godoc.org/github.com/asaskevich/govalidator#ValidateStruct) will not try to validate private fields. Make sure all struct fields are public.
 
     a := &struct {
       email string `valid:"email,required"`
