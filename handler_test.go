@@ -12,10 +12,10 @@ import (
 )
 
 type TestUser struct {
-	Name string `valid:"alphanum,required"`
-	// Email string `valid:"email,required"`
+	Name  string `valid:"alphanum,required"`
+	Email string `valid:"email,required"`
 	// Bio   string `valid:"ascii,required"`
-	Date string `valid:"-"`
+	// Date string `valid:"-"`
 }
 
 type TestUserService struct {
@@ -74,7 +74,7 @@ func TestValidation(t *testing.T) {
 		{
 			Name:       "Valid JSON",
 			URL:        "/Save",
-			JSON:       map[string]string{"name": "john", "email": "a@b"},
+			JSON:       map[string]string{"name": "john", "email": "j@example.com"},
 			StatusCode: http.StatusOK,
 			// Response:   "foo",
 		},
@@ -159,4 +159,43 @@ func TestValidation(t *testing.T) {
 		})
 	}
 
+}
+
+func BenchmarkHandler(b *testing.B) {
+
+	var req *http.Request
+
+	// Create HTTP mux/router
+	mux, err := Wrap(&TestUserService{Foo: "foo"})
+	if err != nil {
+		b.Error(err)
+	}
+
+	jsonbytes, err := json.Marshal(map[string]string{"name": "john", "email": "email@example.com"})
+	if err != nil {
+		b.Error(err)
+	}
+
+	for i := 0; i < b.N; i++ {
+		req, err = http.NewRequest("POST", "/Save", bytes.NewReader(jsonbytes))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		req.Header.Add("Content-Type", "application/json")
+
+		rr := httptest.NewRecorder()
+
+		mux.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			b.Errorf("Wrong status code: got %v want %v", status, http.StatusOK)
+		}
+
+		response := strings.TrimSpace(rr.Body.String())
+		want := `{"success":true,"data":23}`
+		if response != want {
+			b.Errorf("Wrong response:\ngot %s\nwant %s", response, want)
+		}
+	}
 }

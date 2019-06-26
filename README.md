@@ -62,7 +62,20 @@ Service methods must return results matching one of two ways:
 The interface{} is often a struct or []slice of structs and is sent JSON encoded to the client.
 
 
+## Benchmarks
 
+    go test -bench=. --benchmem
+
+This package strongly relies on the [reflect package](https://godoc.org/reflect). However, I still achieve _100k requests per second_ on each CPU core.
+
+```
+goos: darwin
+goarch: amd64
+pkg: github.com/Xeoncross/servicehandler
+BenchmarkHandler   	  100000	     11391 ns/op	    4498 B/op	      50 allocs/op
+```
+
+The testing I did on [xeoncross/mid](https://github.com/Xeoncross/mid) places this somewhere between [gongular](https://github.com/mustafaakin/gongular) and [echo's Bind()](https://echo.labstack.com/guide/request) (neither of which have the same scope as this project).
 
 # Roadmap
 
