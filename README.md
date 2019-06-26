@@ -5,7 +5,28 @@ An HTTP mux/router that takes a service and generates the HTTP REST endpoints (w
 
 This is great for prototyping projects quickly when writing an external client (i.e. javascript frontend) that will be interacting with your business logic.
 
+**[Example Application](https://github.com/Xeoncross/servicehandler/blob/master/example/README.md)**
 
+This project assumes you follow some sort of domain design such as [Clean Architecture](https://medium.com/@eminetto/clean-architecture-using-golang-b63587aa5e3f). If you still follow the old PHP/Ruby "MVC" approach to websites, this library is not for you.
+
+In Go, you are encouraged to use interfaces so each component does not have to worry about the implementation details of other components. For example, whether users (below) are stored in memory or MySQL should not be a concern for your "service" business logic.
+
+```go
+// Our database
+memoryStore := NewMemoryStore()
+
+// Our business/domain logic
+userService := &UserService{memoryStore}
+
+// Our HTTP handlers (MVC "controllers") are created for us
+handler, err := servicehandler.Wrap(userService)
+
+...
+
+log.Fatal(http.ListenAndServe(":8080", handler))
+```
+
+This is called [Dependency injection](https://medium.com/@zach_4342/dependency-injection-in-golang-e587c69478a8).
 
 
 # Internal Logic
@@ -71,6 +92,6 @@ Possible solutions include:
 
 Only the first option, wrapping structs, makes any sense.
 
-## Projects
+## Related
 
 - https://github.com/google/jsonapi
