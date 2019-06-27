@@ -2,6 +2,7 @@ package servicehandler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -23,13 +24,13 @@ type TestUserService struct {
 }
 
 // Test POST with JSON body
-func (s *TestUserService) Save(u *TestUser) (int, error) {
+func (s *TestUserService) Save(ctx context.Context, u *TestUser) (int, error) {
 	// fmt.Printf("Called Save with %v from %v\n", u, s)
 	return 23, nil
 }
 
 // Test GET with single URL param
-func (s *TestUserService) Get(params struct {
+func (s *TestUserService) Get(ctx context.Context, params struct {
 	ID int `valid:"required"`
 }) (*TestUser, error) {
 	// fmt.Printf("Called Get with %v\n", params.ID)
@@ -38,7 +39,7 @@ func (s *TestUserService) Get(params struct {
 }
 
 // Test GET with multiple params for loading
-func (s *TestUserService) Recent(params struct {
+func (s *TestUserService) Recent(ctx context.Context, params struct {
 	Page    int
 	PerPage int
 }) ([]*TestUser, error) {

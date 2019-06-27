@@ -1,5 +1,7 @@
 package main
 
+import "context"
+
 // We are using "Clean Architecture" which means we are not worrying about
 // the implementation. Instead focusing on a testable, database independent,
 // layer of entities, services, and stores/repositories.
@@ -29,14 +31,14 @@ type UserService struct {
 	Store UserStore
 }
 
-func (s *UserService) Create(u *User) (int32, error) {
+func (s *UserService) Create(ctx context.Context, u *User) (int32, error) {
 	// Send welcome email?
 	// Log metrics?
 	// foobar?
 	return s.Store.Save(u)
 }
 
-func (s *UserService) Get(params struct {
+func (s *UserService) Get(ctx context.Context, params struct {
 	ID int32 `valid:"required"`
 }) (*User, error) {
 	user, err := s.Store.GetByID(params.ID)

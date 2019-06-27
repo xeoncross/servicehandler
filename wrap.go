@@ -1,8 +1,10 @@
 package servicehandler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -10,10 +12,11 @@ import (
 	"github.com/asaskevich/govalidator"
 )
 
-const (
-	// TagQuery is the field tag to define a query parameter's key
-	TagQuery = "q"
-)
+// TagQuery is the field tag to define a query parameter's key
+const TagQuery = "q"
+
+// MaxBodySize allowed for JSON requests is 1MB of data
+var MaxBodySize int64 = 1 * 1024 * 1024
 
 // JSONResponse for validation errors or service responses
 type JSONResponse struct {
@@ -30,6 +33,7 @@ type serviceMethod struct {
 	anonymous bool
 }
 
+// Wrap a service with a http.Handler to respond to HTTP GET/POST requests
 func Wrap(service interface{}) (http.Handler, error) {
 
 	// Improve performance (and clarity) by pre-computing needed variables
@@ -52,8 +56,8 @@ func Wrap(service interface{}) (http.Handler, error) {
 		methodType := serviceType.Method(i)
 		method := methodType.Func
 
-		if methodType.Type.NumIn() != 2 {
-			return nil, fmt.Errorf("%s.%s() can only take 1 struct parameter. Wrap existing parameters in a struct.", serviceName, methodType.Name)
+		if methodType.Type.NumIn() != 3 {
+			return nil, fmt.Errorf("%s.%s(context.Context, struct{}) is the correct function signature.", serviceName, methodType.Name)
 		}
 
 		if methodType.Type.NumOut() > 2 {
@@ -73,6 +77,15 @@ func Wrap(service interface{}) (http.Handler, error) {
 
 			// First param is method receiver
 			if j == 0 {
+				continue
+			}
+
+			// Second param is context.Context
+			if j == 1 {
+				if !isContext(paramType) {
+					return nil, fmt.Errorf("%s.%s(context.Context, struct{}) is the correct function signature.", serviceName, methodType.Name)
+				}
+
 				continue
 			}
 
@@ -121,7 +134,6 @@ func Wrap(service interface{}) (http.Handler, error) {
 			return
 		}
 
-		// fmt.Printf("HTTP %s %s(%v)\n", r.Method, name, methods[name].in[1])
 		in := make([]reflect.Value, len(method.in))
 
 		for i, paramType := range method.in {
@@ -130,6 +142,12 @@ func Wrap(service interface{}) (http.Handler, error) {
 			// This also enables access to struct fields from inside the method
 			if i == 0 {
 				in[i] = serviceValue
+				continue
+			}
+
+			// First parameter is the context.Context
+			if i == 1 {
+				in[i] = reflect.ValueOf(r.Context())
 				continue
 			}
 
@@ -187,13 +205,15 @@ func Wrap(service interface{}) (http.Handler, error) {
 					return
 				}
 
+				// Limit the size of the request body to avoid a DOS with a large nested
+				// JSON structure: https://golang.org/src/net/http/request.go#L1148
+				r := io.LimitReader(r.Body, MaxBodySize)
+
 				oi := object.Interface()
-				_ = json.NewDecoder(r.Body).Decode(&oi)
-				// if err != nil {
-				// 	// We don't care about JSON type errors nor want to give app details out
-				// 	// the validator will handle those messages better below
-				// 	log.Println(err)
-				// }
+
+				// We don't care about JSON type errors nor want to give app details out
+				// The validator will handle those messages better below
+				_ = json.NewDecoder(r).Decode(&oi)
 			}
 
 			// 2. Validate the struct data rules
@@ -254,6 +274,11 @@ func newReflectType(t reflect.Type) reflect.Value {
 	}
 
 	return reflect.New(t)
+}
+
+// TypeOf trick found at https://groups.google.com/forum/#!topic/golang-nuts/qgJy_H2GysY
+func isContext(r reflect.Type) bool {
+	return r.Implements(reflect.TypeOf((*context.Context)(nil)).Elem())
 }
 
 // JSON response helper
